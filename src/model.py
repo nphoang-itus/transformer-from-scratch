@@ -125,3 +125,51 @@ class PositionWiseFeedForward(nn.Module):
         x = self.fc2(x)
 
         return x
+    
+class PositionalEncoding(nn.Module):
+    pe: torch.Tensor  # Type annotation to help Pylance understand pe is a tensor
+
+    def __init__(self, d_model: int, max_seq_length: int):
+        super().__init__()
+
+        if d_model % 2 != 0:
+            raise ValueError("d_model must be even for this positional encoding implementation")
+
+        # pe: [max_seq_length, d_model]
+        pe = torch.zeros(max_seq_length, d_model)
+
+        # position: [max_seq_length, 1]
+        position = torch.arange(0, max_seq_length, dtype=torch.float).unsqueeze(1)
+
+        # div_term: [d_model / 2]
+        div_term = torch.exp(
+            torch.arange(0, d_model, 2, dtype=torch.float)
+            * (-math.log(10000.0) / d_model)
+        )
+
+        # Even dimensions: 0, 2, 4, ...
+        pe[:, 0::2] = torch.sin(position * div_term)
+
+        # Odd dimensions: 1, 3, 5, ...
+        pe[:, 1::2] = torch.cos(position * div_term)
+
+        # Add batch dimension:
+        # [max_seq_length, d_model] -> [1, max_seq_length, d_model]
+        pe = pe.unsqueeze(0)
+
+        # Register as buffer:
+        # - saved with model state_dict
+        # - moved to device when calling model.to(device)
+        # - not trained as parameter
+        self.register_buffer("pe", pe)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        x:      [B, seq_len, d_model]
+        output: [B, seq_len, d_model]
+        """
+        seq_len = x.size(1)
+
+        x = x + self.pe[:, :seq_len, :]
+
+        return x
