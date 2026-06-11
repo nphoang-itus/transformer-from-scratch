@@ -1,6 +1,6 @@
 import torch
 
-from .model import Transformer
+from model import Transformer
 
 
 PAD_IDX = 0
