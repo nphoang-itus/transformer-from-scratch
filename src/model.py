@@ -230,3 +230,82 @@ class EncoderLayer(nn.Module):
         x = self.norm2(x + self.dropout(feed_forward_output))
 
         return x
+    
+class DecoderLayer(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        d_ff: int,
+        dropout: float,
+    ):
+        super().__init__()
+
+        self.self_attention = MultiHeadAttention(
+            d_model=d_model,
+            num_heads=num_heads,
+        )
+
+        self.cross_attention = MultiHeadAttention(
+            d_model=d_model,
+            num_heads=num_heads,
+        )
+
+        self.feed_forward = PositionWiseFeedForward(
+            d_model=d_model,
+            d_ff=d_ff,
+        )
+
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+        self.norm3 = nn.LayerNorm(d_model)
+
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        encoder_output: torch.Tensor,
+        src_mask: torch.Tensor | None = None,
+        tgt_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """
+        x:              [B, tgt_seq_len, d_model]
+        encoder_output: [B, src_seq_len, d_model]
+        src_mask:       optional source padding mask
+        tgt_mask:       optional target look-ahead mask
+
+        output:         [B, tgt_seq_len, d_model]
+        """
+
+        # 1. Masked self-attention over target sequence
+        self_attention_output = self.self_attention(
+            query=x,
+            key=x,
+            value=x,
+            mask=tgt_mask,
+        )
+
+        # 2. Residual connection + LayerNorm
+        x = self.norm1(x + self.dropout(self_attention_output))
+
+        # 3. Cross-attention:
+        # query comes from decoder
+        # key and value come from encoder
+        cross_attention_output = self.cross_attention(
+            query=x,
+            key=encoder_output,
+            value=encoder_output,
+            mask=src_mask,
+        )
+
+        # 4. Residual connection + LayerNorm
+        x = self.norm2(x + self.dropout(cross_attention_output))
+
+        # 5. Position-wise feed-forward
+        feed_forward_output = self.feed_forward(x)
+
+        # 6. Residual connection + LayerNorm
+        x = self.norm3(x + self.dropout(feed_forward_output))
+
+        return x
