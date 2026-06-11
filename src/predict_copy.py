@@ -1,46 +1,18 @@
 import argparse
-import sys
 from pathlib import Path
 
 import torch
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
-SRC_DIR = ROOT_DIR / "src"
-sys.path.append(str(SRC_DIR))
 
-from checkpoint import load_checkpoint
-from inference import greedy_decode, trim_after_eos
-from model import Transformer
-
-
-PAD_IDX = 0
-SOS_IDX = 1
-EOS_IDX = 2
-
-
-def get_device() -> torch.device:
-    if torch.backends.mps.is_available():
-        return torch.device("mps")
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    return torch.device("cpu")
-
-
-def build_model(config: dict, device: torch.device) -> Transformer:
-    model = Transformer(
-        src_vocab_size=config["src_vocab_size"],
-        tgt_vocab_size=config["tgt_vocab_size"],
-        d_model=config["d_model"],
-        num_heads=config["num_heads"],
-        num_layers=config["num_layers"],
-        d_ff=config["d_ff"],
-        max_seq_length=config["max_seq_length"],
-        dropout=config["dropout"],
-        src_pad_idx=config["src_pad_idx"],
-        tgt_pad_idx=config["tgt_pad_idx"],
-    )
-
-    return model.to(device)
+try:
+    from .checkpoint import load_checkpoint
+    from .inference import greedy_decode, trim_after_eos
+    from .utils import EOS_IDX, PAD_IDX, SOS_IDX, build_model, get_device
+except ImportError:  # Allows `python src/predict_copy.py`.
+    from checkpoint import load_checkpoint
+    from inference import greedy_decode, trim_after_eos
+    from utils import EOS_IDX, PAD_IDX, SOS_IDX, build_model, get_device
 
 
 def prepare_src_tensor(
@@ -48,8 +20,15 @@ def prepare_src_tensor(
     max_src_len: int,
     device: torch.device,
 ) -> torch.Tensor:
-    """
-    Convert user input token ids into padded tensor.
+    """Convert user token ids into a padded source tensor.
+
+    Args:
+        src_tokens: Normal token ids. Reserved ids 0, 1, 2 are not allowed.
+        max_src_len: Padded source length S.
+        device: Device for the returned tensor.
+
+    Returns:
+        src: [1, S]
 
     Example:
         src_tokens = [13, 13, 7, 8]
@@ -90,8 +69,7 @@ def prepare_src_tensor(
 
 
 def decode_output(token_ids: list[int]) -> list[int]:
-    """
-    For copy task, remove special tokens from generated sequence.
+    """Remove SOS, EOS, and PAD from one generated copy-task sequence.
 
     Example:
         [1, 13, 13, 7, 8, 2] -> [13, 13, 7, 8]
@@ -111,7 +89,7 @@ def decode_output(token_ids: list[int]) -> list[int]:
     return result
 
 
-def parse_args():
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Load trained Transformer checkpoint and run copy-task inference."
     )

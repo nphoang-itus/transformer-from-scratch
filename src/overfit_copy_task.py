@@ -2,120 +2,14 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from model import Transformer
-
-
-PAD_IDX = 0
-SOS_IDX = 1
-EOS_IDX = 2
-
-
-def get_device() -> torch.device:
-    if torch.backends.mps.is_available():
-        return torch.device("mps")
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    return torch.device("cpu")
-
-
-def generate_copy_batch(
-    batch_size: int,
-    min_len: int,
-    max_len: int,
-    vocab_size: int,
-    device: torch.device,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """
-    Copy task.
-
-    Example:
-        src = [7, 12, 5, PAD, PAD]
-        tgt = [SOS, 7, 12, 5, EOS, PAD, PAD]
-    """
-    src_batch = []
-    tgt_batch = []
-
-    for _ in range(batch_size):
-        seq_len = int(torch.randint(
-            low=min_len,
-            high=max_len + 1,
-            size=(1,),
-        ).item())
-
-        tokens = torch.randint(
-            low=3,
-            high=vocab_size,
-            size=(seq_len,),
-        )
-
-        src = torch.full((max_len,), PAD_IDX, dtype=torch.long)
-        src[:seq_len] = tokens
-
-        tgt = torch.full((max_len + 2,), PAD_IDX, dtype=torch.long)
-        tgt[0] = SOS_IDX
-        tgt[1 : seq_len + 1] = tokens
-        tgt[seq_len + 1] = EOS_IDX
-
-        src_batch.append(src)
-        tgt_batch.append(tgt)
-
-    src_batch = torch.stack(src_batch).to(device)
-    tgt_batch = torch.stack(tgt_batch).to(device)
-
-    return src_batch, tgt_batch
-
-
-def greedy_decode(
-    model: Transformer,
-    src: torch.Tensor,
-    max_decode_len: int,
-) -> torch.Tensor:
-    """
-    Generate target sequence autoregressively.
-
-    src: [B, src_seq_len]
-
-    return:
-        generated token ids: [B, generated_len]
-    """
-    model.eval()
-
-    batch_size = src.size(0)
-    device = src.device
-
-    src_mask = model.create_src_mask(src)
-    encoder_output = model.encode(src, src_mask)
-
-    generated = torch.full(
-        (batch_size, 1),
-        SOS_IDX,
-        dtype=torch.long,
-        device=device,
-    )
-
-    for _ in range(max_decode_len):
-        tgt_mask = model.create_tgt_mask(generated)
-
-        decoder_output = model.decode(
-            tgt=generated,
-            encoder_output=encoder_output,
-            src_mask=src_mask,
-            tgt_mask=tgt_mask,
-        )
-
-        # Use only the last decoder position to predict next token
-        last_hidden = decoder_output[:, -1, :]
-        logits = model.fc_out(last_hidden)
-
-        next_token = logits.argmax(dim=-1, keepdim=True)
-
-        generated = torch.cat([generated, next_token], dim=1)
-
-        # Stop early if all samples already generated EOS
-        if torch.all(next_token.squeeze(1) == EOS_IDX):
-            break
-
-    return generated
+try:
+    from .inference import greedy_decode
+    from .model import Transformer
+    from .utils import PAD_IDX, generate_copy_batch, get_device
+except ImportError:  # Allows `python src/overfit_copy_task.py`.
+    from inference import greedy_decode
+    from model import Transformer
+    from utils import PAD_IDX, generate_copy_batch, get_device
 
 
 def main():

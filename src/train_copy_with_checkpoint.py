@@ -1,4 +1,3 @@
-import sys
 from pathlib import Path
 
 import torch
@@ -6,91 +5,31 @@ import torch.nn as nn
 import torch.optim as optim
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
-SRC_DIR = ROOT_DIR / "src"
-sys.path.append(str(SRC_DIR))
 
-from checkpoint import load_checkpoint, save_checkpoint
-from inference import greedy_decode, trim_after_eos
-from model import Transformer
-
-
-PAD_IDX = 0
-SOS_IDX = 1
-EOS_IDX = 2
-
-
-def get_device() -> torch.device:
-    if torch.backends.mps.is_available():
-        return torch.device("mps")
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    return torch.device("cpu")
-
-
-def generate_copy_batch(
-    batch_size: int,
-    min_len: int,
-    max_len: int,
-    vocab_size: int,
-    device: torch.device,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """
-    Generate copy-task data.
-
-    Example:
-        src = [7, 12, 5, PAD, PAD]
-        tgt = [SOS, 7, 12, 5, EOS, PAD, PAD]
-    """
-    src_batch = []
-    tgt_batch = []
-
-    for _ in range(batch_size):
-        seq_len = int(
-            torch.randint(
-                low=min_len,
-                high=max_len + 1,
-                size=(1,),
-            ).item()
-        )
-
-        tokens = torch.randint(
-            low=3,
-            high=vocab_size,
-            size=(seq_len,),
-        )
-
-        src = torch.full((max_len,), PAD_IDX, dtype=torch.long)
-        src[:seq_len] = tokens
-
-        tgt = torch.full((max_len + 2,), PAD_IDX, dtype=torch.long)
-        tgt[0] = SOS_IDX
-        tgt[1 : seq_len + 1] = tokens
-        tgt[seq_len + 1] = EOS_IDX
-
-        src_batch.append(src)
-        tgt_batch.append(tgt)
-
-    src_batch = torch.stack(src_batch).to(device)
-    tgt_batch = torch.stack(tgt_batch).to(device)
-
-    return src_batch, tgt_batch
-
-
-def build_model(config: dict, device: torch.device) -> Transformer:
-    model = Transformer(
-        src_vocab_size=config["src_vocab_size"],
-        tgt_vocab_size=config["tgt_vocab_size"],
-        d_model=config["d_model"],
-        num_heads=config["num_heads"],
-        num_layers=config["num_layers"],
-        d_ff=config["d_ff"],
-        max_seq_length=config["max_seq_length"],
-        dropout=config["dropout"],
-        src_pad_idx=config["src_pad_idx"],
-        tgt_pad_idx=config["tgt_pad_idx"],
+try:
+    from .checkpoint import load_checkpoint, save_checkpoint
+    from .inference import greedy_decode, trim_after_eos
+    from .model import Transformer
+    from .utils import (
+        EOS_IDX,
+        PAD_IDX,
+        SOS_IDX,
+        build_model,
+        generate_copy_batch,
+        get_device,
     )
-
-    return model.to(device)
+except ImportError:  # Allows `python src/train_copy_with_checkpoint.py`.
+    from checkpoint import load_checkpoint, save_checkpoint
+    from inference import greedy_decode, trim_after_eos
+    from model import Transformer
+    from utils import (
+        EOS_IDX,
+        PAD_IDX,
+        SOS_IDX,
+        build_model,
+        generate_copy_batch,
+        get_device,
+    )
 
 
 def train_on_fixed_batch(
@@ -102,9 +41,7 @@ def train_on_fixed_batch(
     vocab_size: int,
     num_steps: int,
 ) -> float:
-    """
-    Overfit one fixed batch to verify the Transformer can learn.
-    """
+    """Overfit one fixed copy-task batch to verify the Transformer can learn."""
     model.train()
 
     last_loss = 0.0
@@ -132,12 +69,42 @@ def train_on_fixed_batch(
     return last_loss
 
 
+def put_copy_example_in_batch(
+    src_batch: torch.Tensor,
+    tgt_batch: torch.Tensor,
+    tokens: list[int],
+) -> None:
+    """Overwrite the first batch item with a known copy-task example.
+
+    src_batch: [B, S]
+    tgt_batch: [B, S + 2]
+    """
+    if len(tokens) > src_batch.size(1):
+        raise ValueError("example tokens are longer than the source sequence length")
+
+    src_batch[0].fill_(PAD_IDX)
+    tgt_batch[0].fill_(PAD_IDX)
+
+    src_batch[0, : len(tokens)] = torch.tensor(
+        tokens,
+        dtype=torch.long,
+        device=src_batch.device,
+    )
+    tgt_batch[0, 0] = SOS_IDX
+    tgt_batch[0, 1 : len(tokens) + 1] = torch.tensor(
+        tokens,
+        dtype=torch.long,
+        device=tgt_batch.device,
+    )
+    tgt_batch[0, len(tokens) + 1] = EOS_IDX
+
+
 def print_decode_results(
     model: Transformer,
     src: torch.Tensor,
     target: torch.Tensor,
     max_decode_len: int,
-):
+) -> None:
     model.eval()
 
     with torch.no_grad():
@@ -209,6 +176,11 @@ def main():
         max_len=max_src_len,
         vocab_size=vocab_size,
         device=device,
+    )
+    put_copy_example_in_batch(
+        src_batch=fixed_src,
+        tgt_batch=fixed_tgt,
+        tokens=[13, 13, 7, 8],
     )
 
     print("Fixed training sample:")

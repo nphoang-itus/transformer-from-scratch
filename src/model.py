@@ -3,7 +3,14 @@ import math
 import torch
 import torch.nn as nn
 
+
 class MultiHeadAttention(nn.Module):
+    """Multi-head attention implemented from linear projections and matmul.
+
+    Input tensors use batch-first shape [B, seq_len, d_model].
+    Output has shape [B, query_len, d_model].
+    """
+
     def __init__(self, d_model: int, num_heads: int):
         super().__init__()
 
@@ -23,29 +30,37 @@ class MultiHeadAttention(nn.Module):
         self.W_o = nn.Linear(d_model, d_model)
 
     def split_heads(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Convert:
-            [B, seq_len, d_model]
-        into:
+        """Split the last dimension into independent attention heads.
+
+        Args:
+            x: [B, seq_len, d_model]
+
+        Returns:
             [B, num_heads, seq_len, d_k]
         """
         batch_size, seq_len, _ = x.size()
 
+        # [B, seq_len, d_model] -> [B, seq_len, num_heads, d_k]
         x = x.view(batch_size, seq_len, self.num_heads, self.d_k)
+        # [B, seq_len, num_heads, d_k] -> [B, num_heads, seq_len, d_k]
         x = x.transpose(1, 2)
 
         return x
 
     def combine_heads(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Convert:
-            [B, num_heads, seq_len, d_k]
-        back into:
+        """Concatenate attention heads back into d_model.
+
+        Args:
+            x: [B, num_heads, seq_len, d_k]
+
+        Returns:
             [B, seq_len, d_model]
         """
         batch_size, _, seq_len, _ = x.size()
 
+        # [B, num_heads, seq_len, d_k] -> [B, seq_len, num_heads, d_k]
         x = x.transpose(1, 2).contiguous()
+        # [B, seq_len, num_heads, d_k] -> [B, seq_len, d_model]
         x = x.view(batch_size, seq_len, self.d_model)
 
         return x
@@ -57,23 +72,28 @@ class MultiHeadAttention(nn.Module):
         V: torch.Tensor,
         mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """
+        """Compute scaled dot-product attention for all heads.
+
         Q: [B, num_heads, query_len, d_k]
         K: [B, num_heads, key_len, d_k]
         V: [B, num_heads, key_len, d_k]
+        mask: broadcastable to [B, num_heads, query_len, key_len]
 
-        scores:            [B, num_heads, query_len, key_len]
-        attention_weights: [B, num_heads, query_len, key_len]
-        output:            [B, num_heads, query_len, d_k]
+        Returns:
+            output: [B, num_heads, query_len, d_k]
         """
+        # Q: [B, num_heads, query_len, d_k]
+        # K.transpose: [B, num_heads, d_k, key_len]
+        # scores: [B, num_heads, query_len, key_len]
         scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.d_k)
 
         if mask is not None:
-            # Masked positions get a very negative value before softmax
+            # Masked positions get a very negative value before softmax.
             scores = scores.masked_fill(mask == 0, -1e9)
 
+        # attention_weights: [B, num_heads, query_len, key_len]
         attention_weights = torch.softmax(scores, dim=-1)
-
+        # output: [B, num_heads, query_len, d_k]
         output = torch.matmul(attention_weights, V)
 
         return output
@@ -85,13 +105,17 @@ class MultiHeadAttention(nn.Module):
         value: torch.Tensor,
         mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """
-        query: [B, query_len, d_model]
-        key:   [B, key_len, d_model]
-        value: [B, key_len, d_model]
+        """Apply multi-head attention.
 
-        output: [B, query_len, d_model]
+        query: [B, query_len, d_model]
+        key: [B, key_len, d_model]
+        value: [B, key_len, d_model]
+        mask: broadcastable to [B, num_heads, query_len, key_len]
+
+        Returns:
+            [B, query_len, d_model]
         """
+        # Project each token embedding into query, key, and value spaces.
         Q = self.W_q(query)
         K = self.W_k(key)
         V = self.W_v(value)
@@ -107,7 +131,14 @@ class MultiHeadAttention(nn.Module):
 
         return output
 
+
 class PositionWiseFeedForward(nn.Module):
+    """Two-layer feed-forward network applied independently at each position.
+
+    Input: [B, seq_len, d_model]
+    Output: [B, seq_len, d_model]
+    """
+
     def __init__(self, d_model: int, d_ff: int):
         super().__init__()
 
@@ -116,17 +147,28 @@ class PositionWiseFeedForward(nn.Module):
         self.fc2 = nn.Linear(d_ff, d_model)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        x:      [B, seq_len, d_model]
-        output: [B, seq_len, d_model]
+        """Apply d_model -> d_ff -> d_model to every token position.
+
+        Args:
+            x: [B, seq_len, d_model]
+
+        Returns:
+            [B, seq_len, d_model]
         """
         x = self.fc1(x)
         x = self.relu(x)
         x = self.fc2(x)
 
         return x
-    
+
+
 class PositionalEncoding(nn.Module):
+    """Sinusoidal positional encoding added to token embeddings.
+
+    Input: [B, seq_len, d_model]
+    Output: [B, seq_len, d_model]
+    """
+
     pe: torch.Tensor  # Type annotation to help Pylance understand pe is a tensor
 
     def __init__(self, d_model: int, max_seq_length: int):
@@ -164,17 +206,28 @@ class PositionalEncoding(nn.Module):
         self.register_buffer("pe", pe)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        x:      [B, seq_len, d_model]
-        output: [B, seq_len, d_model]
+        """Add the first seq_len positional vectors to x.
+
+        Args:
+            x: [B, seq_len, d_model]
+
+        Returns:
+            [B, seq_len, d_model]
         """
         seq_len = x.size(1)
 
         x = x + self.pe[:, :seq_len, :]
 
         return x
-    
+
+
 class EncoderLayer(nn.Module):
+    """One Transformer encoder block.
+
+    The block performs source self-attention, residual + LayerNorm, position-wise
+    feed-forward, and another residual + LayerNorm.
+    """
+
     def __init__(
         self,
         d_model: int,
@@ -204,11 +257,14 @@ class EncoderLayer(nn.Module):
         x: torch.Tensor,
         src_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """
-        x:        [B, src_seq_len, d_model]
-        src_mask: optional mask for source sequence
+        """Encode source hidden states.
 
-        output:   [B, src_seq_len, d_model]
+        Args:
+            x: [B, S, d_model]
+            src_mask: Optional source mask [B, 1, 1, S]
+
+        Returns:
+            [B, S, d_model]
         """
 
         # 1. Multi-head self-attention
@@ -230,8 +286,15 @@ class EncoderLayer(nn.Module):
         x = self.norm2(x + self.dropout(feed_forward_output))
 
         return x
-    
+
+
 class DecoderLayer(nn.Module):
+    """One Transformer decoder block.
+
+    The block performs masked target self-attention, cross-attention over encoder
+    outputs, and a position-wise feed-forward network, each with residual + LayerNorm.
+    """
+
     def __init__(
         self,
         d_model: int,
@@ -269,13 +332,16 @@ class DecoderLayer(nn.Module):
         src_mask: torch.Tensor | None = None,
         tgt_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """
-        x:              [B, tgt_seq_len, d_model]
-        encoder_output: [B, src_seq_len, d_model]
-        src_mask:       optional source padding mask
-        tgt_mask:       optional target look-ahead mask
+        """Decode target hidden states using target and source context.
 
-        output:         [B, tgt_seq_len, d_model]
+        Args:
+            x: [B, T, d_model]
+            encoder_output: [B, S, d_model]
+            src_mask: Optional source padding mask [B, 1, 1, S]
+            tgt_mask: Optional target mask [B, 1, T, T]
+
+        Returns:
+            [B, T, d_model]
         """
 
         # 1. Masked self-attention over target sequence
@@ -309,8 +375,19 @@ class DecoderLayer(nn.Module):
         x = self.norm3(x + self.dropout(feed_forward_output))
 
         return x
-    
+
+
 class Transformer(nn.Module):
+    """Educational encoder-decoder Transformer from scratch.
+
+    Source and target inputs are integer token ids. The model returns logits for
+    each target input position.
+
+    src: [B, S]
+    tgt: [B, T]
+    logits: [B, T, tgt_vocab_size]
+    """
+
     def __init__(
         self,
         src_vocab_size: int,
@@ -410,6 +487,16 @@ class Transformer(nn.Module):
         src: torch.Tensor,
         tgt: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Create source and target masks.
+
+        Args:
+            src: [B, S]
+            tgt: [B, T]
+
+        Returns:
+            src_mask: [B, 1, 1, S]
+            tgt_mask: [B, 1, T, T]
+        """
         src_mask = self.create_src_mask(src)
         tgt_mask = self.create_tgt_mask(tgt)
 

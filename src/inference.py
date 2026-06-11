@@ -1,11 +1,11 @@
 import torch
 
-from model import Transformer
-
-
-PAD_IDX = 0
-SOS_IDX = 1
-EOS_IDX = 2
+try:
+    from .model import Transformer
+    from .utils import EOS_IDX, PAD_IDX, SOS_IDX
+except ImportError:  # Allows `python src/inference.py` style local imports.
+    from model import Transformer
+    from utils import EOS_IDX, PAD_IDX, SOS_IDX
 
 
 def greedy_decode(
@@ -16,20 +16,16 @@ def greedy_decode(
     eos_idx: int = EOS_IDX,
     pad_idx: int = PAD_IDX,
 ) -> torch.Tensor:
-    """
-    Autoregressive greedy decoding.
+    """Generate target token ids with autoregressive greedy decoding.
 
-    src:
-        [B, src_seq_len]
+    Args:
+        model: Encoder-decoder Transformer.
+        src: Source token ids with shape [B, S].
+        max_decode_len: Maximum number of tokens to append after SOS.
 
-    return:
-        generated token ids [B, generated_len]
-
-    Behavior:
-        - Starts with SOS.
-        - Appends one predicted token per step.
-        - Once a sample generates EOS, future tokens for that sample become PAD.
-        - Stops early when all samples have generated EOS.
+    Returns:
+        Generated token ids with shape [B, generated_len]. The first token is SOS.
+        Once a sample generates EOS, later generated positions for that sample are PAD.
     """
     model.eval()
 
@@ -92,9 +88,7 @@ def trim_after_eos(
     eos_idx: int = EOS_IDX,
     pad_idx: int = PAD_IDX,
 ) -> list[int]:
-    """
-    Trim a generated sequence after the first EOS.
-    Also removes trailing PAD after EOS.
+    """Trim a generated sequence after the first EOS or trailing PAD tokens.
 
     Example:
         [1, 13, 7, 2, 0, 0] -> [1, 13, 7, 2]

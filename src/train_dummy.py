@@ -2,75 +2,12 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from model import Transformer
-
-
-PAD_IDX = 0
-SOS_IDX = 1
-EOS_IDX = 2
-
-
-def get_device() -> torch.device:
-    if torch.backends.mps.is_available():
-        return torch.device("mps")
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    return torch.device("cpu")
-
-
-def generate_copy_batch(
-    batch_size: int,
-    min_len: int,
-    max_len: int,
-    vocab_size: int,
-    device: torch.device,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """
-    Generate a batch for copy task.
-
-    Example:
-        src = [12, 8, 31, 5, PAD, PAD]
-        tgt = [SOS, 12, 8, 31, 5, EOS, PAD, PAD]
-
-    Returns:
-        src: [B, max_len]
-        tgt: [B, max_len + 2]
-    """
-    src_batch = []
-    tgt_batch = []
-
-    for _ in range(batch_size):
-        seq_len = int(
-            torch.randint(
-                low=min_len,
-                high=max_len + 1,
-                size=(1,),
-            ).item()
-        )
-
-        # Token ids 3..vocab_size-1 are normal tokens.
-        # 0, 1, 2 are reserved for PAD, SOS, EOS.
-        tokens = torch.randint(
-            low=3,
-            high=vocab_size,
-            size=(seq_len,),
-        )
-
-        src = torch.full((max_len,), PAD_IDX, dtype=torch.long)
-        src[:seq_len] = tokens
-
-        tgt = torch.full((max_len + 2,), PAD_IDX, dtype=torch.long)
-        tgt[0] = SOS_IDX
-        tgt[1 : seq_len + 1] = tokens
-        tgt[seq_len + 1] = EOS_IDX
-
-        src_batch.append(src)
-        tgt_batch.append(tgt)
-
-    src_batch = torch.stack(src_batch).to(device)
-    tgt_batch = torch.stack(tgt_batch).to(device)
-
-    return src_batch, tgt_batch
+try:
+    from .model import Transformer
+    from .utils import PAD_IDX, generate_copy_batch, get_device
+except ImportError:  # Allows `python src/train_dummy.py`.
+    from model import Transformer
+    from utils import PAD_IDX, generate_copy_batch, get_device
 
 
 def main():
