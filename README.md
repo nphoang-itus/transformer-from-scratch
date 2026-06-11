@@ -24,8 +24,7 @@ transformer-from-scratch/
 │   ├── train_copy_with_checkpoint.py
 │   ├── train_dummy.py
 │   └── utils.py
-├── test/      # original educational scripts
-└── tests/     # wrappers for the documented commands
+└── tests/
 ```
 
 Generated checkpoints are written to `checkpoints/` and should not be committed.
