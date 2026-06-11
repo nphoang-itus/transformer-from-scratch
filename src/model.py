@@ -106,3 +106,22 @@ class MultiHeadAttention(nn.Module):
         output = self.W_o(output)
 
         return output
+
+class PositionWiseFeedForward(nn.Module):
+    def __init__(self, d_model: int, d_ff: int):
+        super().__init__()
+
+        self.fc1 = nn.Linear(d_model, d_ff)
+        self.relu = nn.ReLU()
+        self.fc2 = nn.Linear(d_ff, d_model)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        x:      [B, seq_len, d_model]
+        output: [B, seq_len, d_model]
+        """
+        x = self.fc1(x)
+        x = self.relu(x)
+        x = self.fc2(x)
+
+        return x
